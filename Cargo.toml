@@ -2,6 +2,12 @@
 name = "oapi-cli"
 version = "0.1.0"
 edition = "2024"
+authors = ["Ilia Zubkov izubkov.forall@gmail.com"]
+description = "CLI tool for modifying, filtering and pruning OpenAPI specs."
+license = "MIT"
+repository = "https://github.com/izubkov/oapi-cli"
+keywords = ["openapi", "cli", "developer-tools", "api", "code-generation"]
+categories = ["command-line-utilities", "web-programming"]
 
 [dependencies]
 anyhow = "1.0.100"

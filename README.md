@@ -1,6 +1,6 @@
 # oapi-cli
 
-Especially useful when working with large OpenAPI specs, `oapi-cli` is a command-line tool that filters, prunes, and extracts only the paths and components you need. Ideal for preparing compact specs for AI agents and LLM workflows.
+CLI tool for modifying, filtering and pruning OpenAPI specs. Especially useful when working with large OpenAPI specs, `oapi-cli` is a command-line tool that filters, prunes, and extracts only the paths and components you need. Ideal for preparing compact specs for AI agents and LLM workflows.
 
 ## Usage
 
