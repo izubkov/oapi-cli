@@ -94,3 +94,351 @@ fn filter_refs(refs: &HashSet<String>, prefix: &str) -> HashSet<String> {
 fn prune_map<T>(map: &mut IndexMap<String, T>, keep: &HashSet<String>) {
     map.retain(|k, _| keep.contains(k));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openapiv3::{OpenAPI, Paths, ReferenceOr, Schema, Type, SchemaKind, Components};
+    use serde_json::json;
+
+    fn create_minimal_spec() -> OpenAPI {
+        OpenAPI {
+            openapi: "3.0.0".to_string(),
+            info: openapiv3::Info {
+                title: "Test API".to_string(),
+                version: "1.0.0".to_string(),
+                ..Default::default()
+            },
+            paths: Paths::default(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_filter_paths_exact_match() {
+        let mut spec = create_minimal_spec();
+        spec.paths.paths.insert("/api/v1/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v1/posts".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v2/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+
+        filter_paths(&mut spec, &["/api/v1/users".to_string()]);
+
+        assert_eq!(spec.paths.paths.len(), 1);
+        assert!(spec.paths.paths.contains_key("/api/v1/users"));
+    }
+
+    #[test]
+    fn test_filter_paths_prefix_match() {
+        let mut spec = create_minimal_spec();
+        spec.paths.paths.insert("/api/v1/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v1/posts".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v2/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+
+        filter_paths(&mut spec, &["/api/v1/*".to_string()]);
+
+        assert_eq!(spec.paths.paths.len(), 2);
+        assert!(spec.paths.paths.contains_key("/api/v1/users"));
+        assert!(spec.paths.paths.contains_key("/api/v1/posts"));
+        assert!(!spec.paths.paths.contains_key("/api/v2/users"));
+    }
+
+    #[test]
+    fn test_filter_paths_mixed_patterns() {
+        let mut spec = create_minimal_spec();
+        spec.paths.paths.insert("/api/v1/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v1/posts".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v2/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/special".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+
+        filter_paths(&mut spec, &["/api/v1/*".to_string(), "/special".to_string()]);
+
+        assert_eq!(spec.paths.paths.len(), 3);
+        assert!(spec.paths.paths.contains_key("/api/v1/users"));
+        assert!(spec.paths.paths.contains_key("/api/v1/posts"));
+        assert!(spec.paths.paths.contains_key("/special"));
+        assert!(!spec.paths.paths.contains_key("/api/v2/users"));
+    }
+
+    #[test]
+    fn test_filter_paths_no_matches() {
+        let mut spec = create_minimal_spec();
+        spec.paths.paths.insert("/api/v1/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v1/posts".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+
+        filter_paths(&mut spec, &["/api/v2/*".to_string()]);
+
+        assert_eq!(spec.paths.paths.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_paths_empty_list() {
+        let mut spec = create_minimal_spec();
+        spec.paths.paths.insert("/api/v1/users".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+        spec.paths.paths.insert("/api/v1/posts".to_string(), ReferenceOr::Item(openapiv3::PathItem::default()));
+
+        filter_paths(&mut spec, &[]);
+
+        assert_eq!(spec.paths.paths.len(), 0);
+    }
+
+    #[test]
+    fn test_should_keep_exact() {
+        assert!(should_keep("/api/v1/users", &["/api/v1/users".to_string()]));
+        assert!(!should_keep("/api/v1/posts", &["/api/v1/users".to_string()]));
+    }
+
+    #[test]
+    fn test_should_keep_prefix() {
+        let keep_paths = vec!["/api/v1/*".to_string()];
+        assert!(should_keep("/api/v1/users", &keep_paths));
+        assert!(should_keep("/api/v1/posts", &keep_paths));
+        assert!(should_keep("/api/v1/", &keep_paths));
+        assert!(!should_keep("/api/v2/users", &keep_paths));
+    }
+
+    #[test]
+    fn test_should_keep_no_match() {
+        assert!(!should_keep("/api/v1/users", &["/api/v2/*".to_string()]));
+        assert!(!should_keep("/different", &["/api/*".to_string()]));
+    }
+
+    #[test]
+    fn test_collect_refs_simple() {
+        // Create a minimal spec with a path that references a schema
+        let json_data = json!({
+            "openapi": "3.0.0",
+            "info": {
+                "title": "Test",
+                "version": "1.0.0"
+            },
+            "paths": {
+                "/api/users": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "$ref": "#/components/schemas/User"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "components": {
+                "schemas": {
+                    "User": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if let Ok(spec) = serde_json::from_value::<OpenAPI>(json_data) {
+            let refs = collect_refs(&spec);
+            assert!(refs.contains("#/components/schemas/User"));
+            assert_eq!(refs.len(), 1);
+        } else {
+            panic!("Failed to create test spec");
+        }
+    }
+
+    #[test]
+    fn test_collect_refs_nested() {
+        let json_data = json!({
+            "openapi": "3.0.0",
+            "info": {
+                "title": "Test",
+                "version": "1.0.0"
+            },
+            "paths": {
+                "/test": {
+                    "get": {
+                        "parameters": [{
+                            "$ref": "#/components/parameters/TestParam"
+                        }],
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "allOf": [
+                                                { "$ref": "#/components/schemas/Base" },
+                                                { "$ref": "#/components/schemas/Extended" }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if let Ok(spec) = serde_json::from_value::<OpenAPI>(json_data) {
+            let refs = collect_refs(&spec);
+            assert!(refs.contains("#/components/parameters/TestParam"));
+            assert!(refs.contains("#/components/schemas/Base"));
+            assert!(refs.contains("#/components/schemas/Extended"));
+            assert_eq!(refs.len(), 3);
+        }
+    }
+
+    #[test]
+    fn test_collect_refs_empty() {
+        let spec = create_minimal_spec();
+        let refs = collect_refs(&spec);
+        assert_eq!(refs.len(), 0);
+    }
+
+    #[test]
+    fn test_prune_components_schemas() {
+        let mut spec = create_minimal_spec();
+        let mut components = Components::default();
+        
+        let schema = Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::String(Default::default())),
+        };
+        
+        components.schemas.insert("User".to_string(), ReferenceOr::Item(schema.clone()));
+        components.schemas.insert("Post".to_string(), ReferenceOr::Item(schema.clone()));
+        components.schemas.insert("Comment".to_string(), ReferenceOr::Item(schema));
+        
+        spec.components = Some(components);
+
+        let mut refs = HashSet::new();
+        refs.insert("#/components/schemas/User".to_string());
+        refs.insert("#/components/schemas/Post".to_string());
+
+        prune_components(&mut spec, &refs);
+
+        if let Some(components) = &spec.components {
+            assert_eq!(components.schemas.len(), 2);
+            assert!(components.schemas.contains_key("User"));
+            assert!(components.schemas.contains_key("Post"));
+            assert!(!components.schemas.contains_key("Comment"));
+        }
+    }
+
+    #[test]
+    fn test_prune_components_multiple_types() {
+        let mut spec = create_minimal_spec();
+        let mut components = Components::default();
+        
+        let schema = Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::String(Default::default())),
+        };
+        
+        components.schemas.insert("User".to_string(), ReferenceOr::Item(schema.clone()));
+        components.schemas.insert("Unused".to_string(), ReferenceOr::Item(schema));
+        
+        let param = openapiv3::Parameter::Query {
+            parameter_data: openapiv3::ParameterData {
+                name: "page".to_string(),
+                description: None,
+                required: false,
+                deprecated: None,
+                format: openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(Type::Integer(Default::default())),
+                })),
+                example: None,
+                examples: Default::default(),
+                explode: None,
+                extensions: Default::default(),
+            },
+            allow_reserved: false,
+            style: openapiv3::QueryStyle::Form,
+            allow_empty_value: None,
+        };
+        
+        components.parameters.insert("PageParam".to_string(), ReferenceOr::Item(param.clone()));
+        components.parameters.insert("UnusedParam".to_string(), ReferenceOr::Item(param));
+        
+        spec.components = Some(components);
+
+        let mut refs = HashSet::new();
+        refs.insert("#/components/schemas/User".to_string());
+        refs.insert("#/components/parameters/PageParam".to_string());
+
+        prune_components(&mut spec, &refs);
+
+        if let Some(components) = &spec.components {
+            assert_eq!(components.schemas.len(), 1);
+            assert!(components.schemas.contains_key("User"));
+            assert_eq!(components.parameters.len(), 1);
+            assert!(components.parameters.contains_key("PageParam"));
+        }
+    }
+
+    #[test]
+    fn test_prune_components_all_removed() {
+        let mut spec = create_minimal_spec();
+        let mut components = Components::default();
+        
+        let schema = Schema {
+            schema_data: Default::default(),
+            schema_kind: SchemaKind::Type(Type::String(Default::default())),
+        };
+        
+        components.schemas.insert("Unused1".to_string(), ReferenceOr::Item(schema.clone()));
+        components.schemas.insert("Unused2".to_string(), ReferenceOr::Item(schema));
+        
+        spec.components = Some(components);
+
+        let refs = HashSet::new();
+        prune_components(&mut spec, &refs);
+
+        if let Some(components) = &spec.components {
+            assert_eq!(components.schemas.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_filter_refs_extracts_names() {
+        let mut refs = HashSet::new();
+        refs.insert("#/components/schemas/User".to_string());
+        refs.insert("#/components/schemas/Post".to_string());
+        refs.insert("#/components/parameters/PageParam".to_string());
+
+        let schema_names = filter_refs(&refs, "#/components/schemas/");
+        
+        assert_eq!(schema_names.len(), 2);
+        assert!(schema_names.contains("User"));
+        assert!(schema_names.contains("Post"));
+        assert!(!schema_names.contains("PageParam"));
+    }
+
+    #[test]
+    fn test_prune_map_retains_used() {
+        let mut map = IndexMap::new();
+        map.insert("keep1".to_string(), 1);
+        map.insert("remove1".to_string(), 2);
+        map.insert("keep2".to_string(), 3);
+        map.insert("remove2".to_string(), 4);
+
+        let mut keep = HashSet::new();
+        keep.insert("keep1".to_string());
+        keep.insert("keep2".to_string());
+
+        prune_map(&mut map, &keep);
+
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("keep1"));
+        assert!(map.contains_key("keep2"));
+        assert!(!map.contains_key("remove1"));
+        assert!(!map.contains_key("remove2"));
+    }
+}
