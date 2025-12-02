@@ -1,6 +1,6 @@
 [package]
 name = "oapi-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Ilia Zubkov izubkov.forall@gmail.com"]
 description = "CLI tool for modifying, filtering and pruning OpenAPI specs."

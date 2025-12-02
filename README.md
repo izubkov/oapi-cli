@@ -12,7 +12,7 @@ Keeps only paths with a given prefix and removes unused components.
 # keep only exact path
 oapi-cli filter -i openapi.yaml -o openapi-no-example.yaml --path /api/v1/example
 
-# keep all paths starting with /api/v1/
+# keep all paths starting with /api/v1/example/
 oapi-cli filter -i openapi.yaml -o openapi-no-example.yaml --path "/api/v1/example/*"
 ```
 
